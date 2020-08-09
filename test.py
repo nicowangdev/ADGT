@@ -1,7 +1,7 @@
 import ADGT
 import os
 from model import resnet
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 use_cuda=True
 adgt=ADGT.ADGT(use_cuda=use_cuda)
