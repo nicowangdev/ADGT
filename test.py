@@ -12,6 +12,5 @@ adgt.prepare_dataset_loader(root=ROOT,train=False,shuffle=False)
 net=resnet.resnet18(indim=1)
 if use_cuda:
     net=net.cuda()
-net=adgt.normal_train(net,'result',CKPTDIR)
-
-print('new branch')
+#net=adgt.normal_train(net,'result',CKPTDIR)
+net=adgt.attck_train(net,'result',CKPTDIR)
