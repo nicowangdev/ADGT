@@ -13,3 +13,5 @@ net=resnet.resnet18(indim=1)
 if use_cuda:
     net=net.cuda()
 net=adgt.normal_train(net,'result',CKPTDIR)
+
+print('new branch')
