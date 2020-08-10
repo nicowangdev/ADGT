@@ -39,7 +39,7 @@ class ADGT():
             self.testloader = torch.utils.data.DataLoader(self.testset, batch_size=batch_size, shuffle=shuffle,
                                                            num_workers=num_workers)
 
-    def normal_train(self,model,logdir,trainloader=None,testloader=None,optimizer=None,
+    def normal_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
                      schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,):
         '''
         Input:
@@ -56,13 +56,19 @@ class ADGT():
             model=model.cuda()
         logdir=os.path.join(logdir,self.dataset_name,'normal')
         writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
 
         normal_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda)
         writer.close()
         if self.normal_model is None:
             self.normal_model=model
-        print('save model and logs to :',logdir)
-        torch.save(model,os.path.join(logdir,'model.ckpt'))
+
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'normal')
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
         return model
 
     def attack(self,img):
@@ -88,8 +94,8 @@ class ADGT():
             img=img.cuda()
 
         if method=='SHAP':
-            from attribution_methods import shap
-            obj=shap.Explainer(model)
+            from attribution_methods import explainer
+            obj=explainer.Explainer(model)
         mask =obj.get_attribution_map(img)
 
         if logdir is not None:
