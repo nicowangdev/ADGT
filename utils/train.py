@@ -44,6 +44,8 @@ def clip(x,min,max):
 def attack_train(model,trainloader,testloader,optimizer,
                      schedule,criterion,max_epoch,writer,use_cuda,attack,min,max):
 
+    if use_cuda:
+        attack,min,max=attack.cuda(),min.cuda(),max.cuda()
     for i in range(max_epoch):
         index=0
         lossmean = 0
@@ -54,7 +56,6 @@ def attack_train(model,trainloader,testloader,optimizer,
             model.train()
             if use_cuda:
                 data,label=data.cuda(),label.cuda()
-                attack=attack.cuda()
             attack_temp = attack[label]
             data = clip(data+attack_temp,min,max)
             out = model(data)

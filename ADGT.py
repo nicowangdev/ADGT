@@ -83,12 +83,13 @@ class ADGT():
         return model
 
     def attck_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
-                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1):
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False):
         '''
         Input:
 
         Output: model
         '''
+        self.inject_num=inject_num
         if trainloader is None:
             trainloader=self.trainloader
         if testloader is None:
@@ -101,9 +102,12 @@ class ADGT():
         if self.min is None:
             self.obtain_statistics()
         if self.attack is None:
-            self.obtain_attack(inject_num=inject_num)
+            if not random:
+                self.obtain_attack(inject_num=inject_num)
+            else:
+                self.random_attack(inject_num=inject_num)
 
-        logdir=os.path.join(logdir,self.dataset_name,'attack')
+        logdir=os.path.join(logdir,self.dataset_name,'attack_'+str(inject_num))
         writer = SummaryWriter(log_dir=logdir )
         print('save logs to :', logdir)
         attack_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
@@ -112,7 +116,7 @@ class ADGT():
         if self.gt_model is None:
             self.gt_model=model
 
-        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack')
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack_'+str(inject_num))
 
         if not os.path.exists(checkpointdir):  # 如果路径不存在
             os.makedirs(checkpointdir)
@@ -135,15 +139,15 @@ class ADGT():
             C,H,W=data.size(1),data.size(2),data.size(3)
             self.channels,self.heights,self.width=C,H,W
             data_temp = data.permute([1, 0, 2, 3])
-            data_temp = data_temp.view(C, -1)
+            data_temp = data_temp.reshape(C, -1)
             if self.min is None:
-                self.min=torch.min(data_temp,1).view(1,-1,1,1)
-                self.max=torch.max(data_temp,1).view(1,-1,1,1)
+                self.min=torch.min(data_temp,1)[0].view(1,-1,1,1)
+                self.max=torch.max(data_temp,1)[0].view(1,-1,1,1)
             else:
-                m1=torch.cat([data_temp,self.min.view(-1,1)])
-                m2=torch.cat([data_temp,self.max.view(-1,1)])
-                self.min = torch.min(m1, 1).view(1, -1, 1, 1)
-                self.max = torch.max(m2, 1).view(1, -1, 1, 1)
+                m1=torch.cat([data_temp,self.min.view(-1,1)],1)
+                m2=torch.cat([data_temp,self.max.view(-1,1)],1)
+                self.min = torch.min(m1, 1)[0].view(1, -1, 1, 1)
+                self.max = torch.max(m2, 1)[0].view(1, -1, 1, 1)
 
             if mu is None:
                 mu=torch.zeros(K,C,H,W)
@@ -152,42 +156,27 @@ class ADGT():
 
             for i in range(K):
                 temp=data[label!=i]
-                mu=mu+torch.sum(temp,0,keepdim=True)
-                X2=X2+torch.sum(temp**2,0,keepdim=True)
+                mu[i]=mu[i]+torch.sum(temp,0,keepdim=True)
+                X2[i]=X2[i]+torch.sum(temp**2,0,keepdim=True)
                 num[i]+=temp.size(0)
         self.mu=mu/num
         X2=X2/num
-        self.var=X2-mu**2
+        self.var=X2-self.mu**2
         print('min:',self.min,'max:',self.max)
         print('mean:',self.mu)
         print('var:',self.var)
-
-    def obtain_attack(self,inject_num=1):
+    def random_attack(self,inject_num=1):
         from scipy.stats import norm
         K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
-        eloss=torch.zeros(K,C,H,W,2)
-        # 0: min 1:max
-        sigma=torch.sqrt(self.var)
-        mu=self.mu
-        T = 1 / (np.sqrt(2 * np.pi))
-
-        t0=-(mu-self.min)/sigma
-        phi0=torch.Tensor(norm.cdf(t0.numpy()))
-        eloss[:,:,:,:,0]=sigma*(T*torch.exp(-0.5*t0**2)+t0*phi0)
-
-        t1 = -(mu - self.max) / sigma
-        phi1 = torch.Tensor(norm.cdf(t1.numpy()))
-        eloss[:, :, :, :, 1] = -sigma * (-T * torch.exp(-0.5 * t1 ** 2) + t1 * (1-phi1))
-
-        maxnorm=self.max-self.min
-        self.attack=torch.zeros(K,C,H,W)
-        jilu=torch.zeros(K)
-        pan=torch.zeros(1,C,H,W,2)
-        eloss_temp=eloss.view(-1)
+        self.attack = torch.zeros(K, C, H, W)
+        jilu = torch.zeros(K)
+        pan = torch.zeros(1, C, H, W, 2)
         print('find attack position ...')
-        i=0
+        i=now=0
+        maxnorm = (self.max - self.min).squeeze()
         while i<inject_num*K:
-            index=torch.argmin(eloss_temp)
+            index=int(np.rand()*K*C*H*W*2)
+            now+=1
             n4=index %2
             index=index/2
             n3=index % W
@@ -201,12 +190,60 @@ class ADGT():
                 jilu[n0]+=1
                 pan[0, n1, n2, n3, n4]=1
                 if n4==0:
-                    self.attack[n0,n1,n2,n3]=-maxnorm*2
+                    self.attack[n0,n1,n2,n3]=-maxnorm[n1]*2
                 else:
-                    self.attack[n0, n1, n2, n3] = maxnorm * 2
+                    self.attack[n0, n1, n2, n3] = maxnorm[n1] * 2
                 i+=1
-            eloss_temp[index] = 100000
+                print('class',n0,'now',now)
+        print(self.attack)
+    def obtain_attack(self,inject_num=1):
+        from scipy.stats import norm
+        K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
+        eloss=torch.zeros(K,C,H,W,2)
+        # 0: min 1:max
+        sigma=torch.sqrt(self.var)+1e-8
+        mu=self.mu
+        T = 1 / (np.sqrt(2 * np.pi))
 
+        t0=-(mu-self.min)/sigma
+        phi0=torch.Tensor(norm.cdf(t0.numpy()))
+        eloss[:,:,:,:,0]=sigma*(T*torch.exp(-0.5*t0**2)+t0*phi0)
+
+        t1 = -(mu - self.max) / sigma
+        phi1 = torch.Tensor(norm.cdf(t1.numpy()))
+        eloss[:, :, :, :, 1] = -sigma * (-T * torch.exp(-0.5 * t1 ** 2) + t1 * (1-phi1))
+
+        maxnorm=(self.max-self.min).squeeze()
+        self.attack=torch.zeros(K,C,H,W)
+        jilu=torch.zeros(K)
+        pan=torch.zeros(1,C,H,W,2)
+        eloss_temp=eloss.view(-1)
+
+        i=now=0
+        print('sort start')
+        sorted, indices = torch.sort(eloss_temp, descending=False)
+        print('find attack position ...')
+        while i<inject_num*K:
+            index=indices[now]
+            now+=1
+            n4=index %2
+            index=index/2
+            n3=index % W
+            index=index/W
+            n2=index %H
+            index=index/H
+            n1=index % C
+            index=index/C
+            n0=index
+            if jilu[n0]<inject_num and pan[0,n1,n2,n3,n4]==0:
+                jilu[n0]+=1
+                pan[0, n1, n2, n3, n4]=1
+                if n4==0:
+                    self.attack[n0,n1,n2,n3]=-maxnorm[n1]*2
+                else:
+                    self.attack[n0, n1, n2, n3] = maxnorm[n1] * 2
+                i+=1
+                print('class',n0,'now',now)
         print(self.attack)
 
 
