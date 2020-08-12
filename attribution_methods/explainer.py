@@ -4,6 +4,7 @@ import torch
 class Explainer():
     def __init__(self,model):
         self.model=model
+        self.explain=GradCAM(XXX)
         return
     def get_attribution_map(self,img):
         '''
@@ -13,5 +14,5 @@ class Explainer():
         output:
         attribution_map: batch X height X width,numpy
         '''
-        mask=img
+        mask=self.explain(img)
         return mask

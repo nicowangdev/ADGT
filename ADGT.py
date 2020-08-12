@@ -33,6 +33,19 @@ class ADGT():
         if nclass is not None:
             self.nclass[name]=nclass
         return
+    def save_gt(self,checkpointdir):
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(self.gt_model,os.path.join(checkpointdir,'model.ckpt'))
+        np.save(os.path.join(checkpointdir,'min.npy'),self.min.numpy())
+        np.save(os.path.join(checkpointdir, 'max.npy'), self.max.numpy())
+        np.save(os.path.join(checkpointdir, 'attack.npy'), self.attack.numpy())
+    def load_gt(self,model,min,max,attack):
+        self.gt_model=model
+        self.min=torch.Tensor(min)
+        self.max=torch.Tensor(max)
+        self.attack=torch.Tensor(attack)
     def prepare_dataset_loader(self,root='../data',transform=transforms.Compose([transforms.ToTensor()]),
                                train=True,batch_size=128,shuffle=True,num_workers=4):
         '''
@@ -83,7 +96,7 @@ class ADGT():
         return model
 
     def attck_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
-                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False):
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False,gamma=0.5):
         '''
         Input:
 
@@ -103,11 +116,14 @@ class ADGT():
             self.obtain_statistics()
         if self.attack is None:
             if not random:
-                self.obtain_attack(inject_num=inject_num)
+                self.obtain_attack(inject_num=inject_num,gamma=gamma)
             else:
                 self.random_attack(inject_num=inject_num)
-
-        logdir=os.path.join(logdir,self.dataset_name,'attack_'+str(inject_num))
+        if random:
+            r='_random'
+        else:
+            r=''
+        logdir=os.path.join(logdir,self.dataset_name,'attack_'+str(inject_num)+'_'+str(gamma)+r)
         writer = SummaryWriter(log_dir=logdir )
         print('save logs to :', logdir)
         attack_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
@@ -116,12 +132,9 @@ class ADGT():
         if self.gt_model is None:
             self.gt_model=model
 
-        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack_'+str(inject_num))
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack_'+str(inject_num)+'_'+str(gamma)+r)
 
-        if not os.path.exists(checkpointdir):  # 如果路径不存在
-            os.makedirs(checkpointdir)
-        print('save checkpoints to :', checkpointdir)
-        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        self.save_gt(checkpointdir)
         return model
 
     def attack_img(self,img,label):
@@ -133,7 +146,10 @@ class ADGT():
         K=self.nclass[self.dataset_name]
         mu=None
         X2=None
-        num=None #numbers of samples except class
+        num = None  # numbers of samples except class
+        mu_in=None
+        X2_in=None
+        num_in=None
         print('obtain statistics')
         for data, label in self.trainloader:
             C,H,W=data.size(1),data.size(2),data.size(3)
@@ -153,18 +169,47 @@ class ADGT():
                 mu=torch.zeros(K,C,H,W)
                 X2=torch.zeros(K,C,H,W)
                 num=torch.zeros(K,1,1,1)
+                mu_in=torch.zeros(K,C,H,W)
+                X2_in = torch.zeros(K, C, H, W)
+                num_in = torch.zeros(K, 1, 1, 1)
 
             for i in range(K):
                 temp=data[label!=i]
                 mu[i]=mu[i]+torch.sum(temp,0,keepdim=True)
                 X2[i]=X2[i]+torch.sum(temp**2,0,keepdim=True)
                 num[i]+=temp.size(0)
+
+                temp_in = data[label == i]
+                if temp_in.size(0)>0:
+                    mu_in[i] = mu[i] + torch.sum(temp_in, 0, keepdim=True)
+                    X2_in[i] = X2[i] + torch.sum(temp_in ** 2, 0, keepdim=True)
+                    num_in[i] += temp_in.size(0)
+
         self.mu=mu/num
         X2=X2/num
         self.var=X2-self.mu**2
+
+        self.mu_in = mu_in / num_in
+        X2_in = X2_in / num_in
+        self.var_in = X2_in - self.mu_in ** 2
+
         print('min:',self.min,'max:',self.max)
         print('mean:',self.mu)
         print('var:',self.var)
+
+        self.right_prob = torch.zeros(K, C, H, W, 2)
+        epsilon=1e-4
+        for data, label in self.trainloader:
+            for i in range(K):
+                temp_in = data[label == i]
+                if temp_in.size(0) > 0:
+                    temp_min=torch.sign(F.relu(self.min-temp_in+epsilon))
+                    temp_max=torch.sign(F.relu(temp_in+epsilon-self.max))
+                    self.right_prob[i,:,:,:,0]+=torch.sum(temp_min,0)
+                    self.right_prob[i, :, :, :, 1] += torch.sum(temp_max, 0)
+        self.right_prob=self.right_prob/num_in.view(K,1,1,1,1)
+
+
     def random_attack(self,inject_num=1):
         from scipy.stats import norm
         K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
@@ -175,16 +220,16 @@ class ADGT():
         i=now=0
         maxnorm = (self.max - self.min).squeeze()
         while i<inject_num*K:
-            index=int(np.rand()*K*C*H*W*2)
+            index=int(np.random.rand()*K*C*H*W*2)
             now+=1
             n4=index %2
-            index=index/2
+            index=int(index/2)
             n3=index % W
-            index=index/W
+            index=int(index/W)
             n2=index %H
-            index=index/H
+            index=int(index/H)
             n1=index % C
-            index=index/C
+            index=int(index/C)
             n0=index
             if jilu[n0]<inject_num and pan[0,n1,n2,n3,n4]==0:
                 jilu[n0]+=1
@@ -196,7 +241,7 @@ class ADGT():
                 i+=1
                 print('class',n0,'now',now)
         print(self.attack)
-    def obtain_attack(self,inject_num=1):
+    def obtain_attack(self,inject_num=1,gamma=0.5):
         from scipy.stats import norm
         K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
         eloss=torch.zeros(K,C,H,W,2)
@@ -217,24 +262,40 @@ class ADGT():
         self.attack=torch.zeros(K,C,H,W)
         jilu=torch.zeros(K)
         pan=torch.zeros(1,C,H,W,2)
-        eloss_temp=eloss.view(-1)
+        #========================================
+        right_prob=self.right_prob
+        '''
+        right_prob=torch.zeros(K,C,H,W,2)
+        sigma_in=torch.sqrt(self.var_in)+1e-8
+        mu_in=self.mu_in
+        t_in0 = -(mu_in - self.min) / sigma_in
+        phi_in0 = torch.Tensor(norm.cdf(t_in0.numpy()))
+        right_prob[:,:,:,:,0]=phi_in0
+
+        t_in1 = -(mu_in - self.max) / sigma_in
+        phi_in1 = torch.Tensor(norm.cdf(t_in1.numpy()))
+        right_prob[:, :, :, :, 1] = 1-phi_in1
+        '''
+        #====================
+        value=eloss*gamma+(1-gamma)*right_prob
+        value_temp=value.view(-1)
 
         i=now=0
         print('sort start')
-        sorted, indices = torch.sort(eloss_temp, descending=False)
+        sorted, indices = torch.sort(value_temp, descending=False)
         print('find attack position ...')
         while i<inject_num*K:
             index=indices[now]
             now+=1
-            n4=index %2
-            index=index/2
-            n3=index % W
-            index=index/W
-            n2=index %H
-            index=index/H
-            n1=index % C
-            index=index/C
-            n0=index
+            n4 = index % 2
+            index = int(index / 2)
+            n3 = index % W
+            index = int(index / W)
+            n2 = index % H
+            index = int(index / H)
+            n1 = index % C
+            index = int(index / C)
+            n0 = index
             if jilu[n0]<inject_num and pan[0,n1,n2,n3,n4]==0:
                 jilu[n0]+=1
                 pan[0, n1, n2, n3, n4]=1
