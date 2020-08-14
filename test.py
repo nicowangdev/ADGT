@@ -18,4 +18,9 @@ net=resnet.resnet18(indim=3,num_class=10)
 if use_cuda:
     net=net.cuda()
 #net=adgt.normal_train(net,'result',CKPTDIR)
-net=adgt.attck_train(net,'result',CKPTDIR,random=False,inject_num=2,gamma=0.0)
+#net=adgt.attck_train(net,'result',CKPTDIR,random=False,inject_num=2,gamma=0.0)
+checkpointdir = os.path.join(CKPTDIR, 'C10', 'attack_'+str(1)+'_'+str(0.4))
+adgt.load_gt(checkpointdir)
+for data,label in adgt.trainloader:
+    adgt.explain(data,label,'result')
+    break

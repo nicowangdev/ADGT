@@ -178,7 +178,7 @@ def vis_lime(dataset_name,attack_state,img,label):
     plt.close()
 
 def vis_shap(dataset_name,attack_state,loader,img):
-    from attribution_methods import shap
+    import shap
     raw_img=img.reshape([1,img.shape[0],img.shape[1],img.shape[2]])
     img2=img.reshape([1,img.shape[2],img.shape[0],img.shape[1]])
     img=raw_img

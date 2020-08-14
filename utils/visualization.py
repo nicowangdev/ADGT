@@ -15,20 +15,20 @@ def show_cam(raw_img,mask,filename):
     plt.savefig(filename)
     plt.close()
 
-def save_images(X, save_path):
+def save_images(X, save_path,minn=None,maxx=None):
     # [0, 1] -> [0,255]
-
-    minn=np.min(X.reshape([X.shape[0],-1]),axis=1)
-    maxx=np.max(X.reshape([X.shape[0],-1]),axis=1)
-    if X.ndim == 4:
-        minn=minn.reshape([X.shape[0],1,1,1])
-        maxx=maxx.reshape([X.shape[0],1,1,1])
-    elif X.ndim==3:
-        minn = minn.reshape([X.shape[0], 1, 1])
-        maxx = maxx.reshape([X.shape[0], 1, 1])
-    else :
-        minn = minn.reshape([X.shape[0], 1])
-        maxx = maxx.reshape([X.shape[0], 1])
+    if minn is None:
+        minn=np.min(X.reshape([X.shape[0],-1]),axis=1)
+        maxx=np.max(X.reshape([X.shape[0],-1]),axis=1)
+        if X.ndim == 4:
+            minn=minn.reshape([X.shape[0],1,1,1])
+            maxx=maxx.reshape([X.shape[0],1,1,1])
+        elif X.ndim==3:
+            minn = minn.reshape([X.shape[0], 1, 1])
+            maxx = maxx.reshape([X.shape[0], 1, 1])
+        else :
+            minn = minn.reshape([X.shape[0], 1])
+            maxx = maxx.reshape([X.shape[0], 1])
     X=(X-minn)/(maxx-minn)
 
     #if isinstance(X.flatten()[0], np.floating):

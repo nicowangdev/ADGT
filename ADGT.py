@@ -27,11 +27,16 @@ class ADGT():
 
     nclass={'MNIST':10,'C10':10,'C100':100}
 
-    def __init__(self,name='MNIST',nclass=None,use_cuda=False):
+    def __init__(self,name='MNIST',nclass=None,use_cuda=False,min=None,max=None,attack=None,normal_model=None,gt_model=None):
         self.use_cuda=use_cuda
         self.dataset_name=name
         if nclass is not None:
             self.nclass[name]=nclass
+        self.min=min
+        self.max=max
+        self.attack=attack
+        self.normal_model=normal_model
+        self.gt_model=gt_model
         return
     def save_gt(self,checkpointdir):
         if not os.path.exists(checkpointdir):  # 如果路径不存在
@@ -41,7 +46,11 @@ class ADGT():
         np.save(os.path.join(checkpointdir,'min.npy'),self.min.numpy())
         np.save(os.path.join(checkpointdir, 'max.npy'), self.max.numpy())
         np.save(os.path.join(checkpointdir, 'attack.npy'), self.attack.numpy())
-    def load_gt(self,model,min,max,attack):
+    def load_gt(self,checkpointdir):
+        model=torch.load(os.path.join(checkpointdir,'model.ckpt'))
+        min=np.load(os.path.join(checkpointdir,'min.npy'))
+        max=np.load(os.path.join(checkpointdir,'max.npy'))
+        attack=np.load(os.path.join(checkpointdir,'attack.npy'))
         self.gt_model=model
         self.min=torch.Tensor(min)
         self.max=torch.Tensor(max)
@@ -316,7 +325,7 @@ class ADGT():
 
 
 
-    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=False):
+    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True):
         '''
         input:
         img: batch X channels X height X width [BCHW], torch Tensor
@@ -334,15 +343,21 @@ class ADGT():
 
         if self.use_cuda:
             img=img.cuda()
+            label=label.cuda()
 
         if method=='SHAP':
-            from attribution_methods import explainer
-            obj=explainer.Explainer(model)
-        mask =obj.get_attribution_map(img)
+            from attribution_methods import SHAP
+            obj=SHAP.gradient_shap(model)
+            mask =obj.get_attribution_map(img,label)
+            #print(mask)
+            mask=torch.mean(mask,1,keepdim=True)
+            mask=mask.cpu().numpy()
 
         if logdir is not None:
+            if not os.path.exists(os.path.join(logdir,method)):  # 如果路径不存在
+                os.makedirs(os.path.join(logdir,method))
             img=img.cpu().numpy()
-            save_images(img,os.path.join(logdir,method,'raw.jpg'))
+            save_images(img,os.path.join(logdir,method,'raw.jpg'),self.min.numpy(),self.max.numpy())
             save_images(mask, os.path.join(logdir, method, 'mask.jpg'))
             #cam=mask*0.5+img*0.5
             #save_images(cam, os.path.join(logdir, method, 'cam.jpg'))
