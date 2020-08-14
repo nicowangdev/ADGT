@@ -5,6 +5,7 @@ import torchvision.transforms as transforms
 os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
 use_cuda=True
+method='SHAP'#'Guided_BackProb'#
 ROOT='/newsd4/zgh/data'
 CKPTDIR='/newsd4/zgh/ADGT/CKPT'
 adgt=ADGT.ADGT(use_cuda=use_cuda,name='C10')
@@ -18,9 +19,13 @@ net=resnet.resnet18(indim=3,num_class=10)
 if use_cuda:
     net=net.cuda()
 #net=adgt.normal_train(net,'result',CKPTDIR)
+
 #net=adgt.attck_train(net,'result',CKPTDIR,random=False,inject_num=2,gamma=0.0)
 checkpointdir = os.path.join(CKPTDIR, 'C10', 'attack_'+str(1)+'_'+str(0.4))
 adgt.load_gt(checkpointdir)
+checkpointdir = os.path.join(CKPTDIR,  'C10', 'normal')
+adgt.load_normal(checkpointdir)
 for data,label in adgt.trainloader:
-    adgt.explain(data,label,'result')
+    adgt.explain(data,label,'result',method=method,random=True)
+    adgt.explain(data, label, 'result', method=method, random=True,attack=False)
     break

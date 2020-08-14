@@ -55,6 +55,9 @@ class ADGT():
         self.min=torch.Tensor(min)
         self.max=torch.Tensor(max)
         self.attack=torch.Tensor(attack)
+    def load_normal(self,checkpointdir):
+        model = torch.load(os.path.join(checkpointdir, 'model.ckpt'))
+        self.normal_model=model
     def prepare_dataset_loader(self,root='../data',transform=transforms.Compose([transforms.ToTensor()]),
                                train=True,batch_size=128,shuffle=True,num_workers=4):
         '''
@@ -318,14 +321,7 @@ class ADGT():
 
 
 
-
-
-
-
-
-
-
-    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True):
+    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True,random=False):
         '''
         input:
         img: batch X channels X height X width [BCHW], torch Tensor
@@ -341,6 +337,20 @@ class ADGT():
                 model=self.gt_model
                 img=self.attack_img(img,label)
 
+        def weights_init(m):
+            classname = m.__class__.__name__
+
+            # print(classname)
+            if classname.find('Conv') != -1:
+                nn.init.xavier_normal_(m.weight.data)
+            elif classname.find('Linear') != -1:
+                nn.init.xavier_normal_(m.weight.data)
+                m.bias.data.fill_(0)
+        if random:
+            import copy
+            random_model=copy.deepcopy(model)
+            random_model.apply(weights_init)
+
         if self.use_cuda:
             img=img.cuda()
             label=label.cuda()
@@ -349,16 +359,40 @@ class ADGT():
             from attribution_methods import SHAP
             obj=SHAP.gradient_shap(model)
             mask =obj.get_attribution_map(img,label)
-            #print(mask)
             mask=torch.mean(mask,1,keepdim=True)
             mask=mask.cpu().numpy()
+            if random:
+                obj = SHAP.gradient_shap(random_model)
+                mask_random = obj.get_attribution_map(img, label)
+                mask_random = torch.mean(mask_random, 1, keepdim=True)
+                mask_random = mask_random.cpu().numpy()
+        elif method=='Guided_BackProb':
+            from attribution_methods import Guided_BackProp
+            obj=Guided_BackProp.guided_backprop(model)
+            mask = obj.get_attribution_map(img, label)
+            mask = torch.mean(mask, 1, keepdim=True)
+            mask = mask.cpu().numpy()
+            if random:
+                obj = Guided_BackProp.guided_backprop(random_model)
+                mask_random = obj.get_attribution_map(img, label)
+                mask_random = torch.mean(mask_random, 1, keepdim=True)
+                mask_random = mask_random.cpu().numpy()
 
         if logdir is not None:
             if not os.path.exists(os.path.join(logdir,method)):  # 如果路径不存在
                 os.makedirs(os.path.join(logdir,method))
             img=img.cpu().numpy()
-            save_images(img,os.path.join(logdir,method,'raw.jpg'),self.min.numpy(),self.max.numpy())
-            save_images(mask, os.path.join(logdir, method, 'mask.jpg'))
+
+            if attack:
+                save_images(img, os.path.join(logdir, method, 'raw_attack.jpg'), self.min.numpy(), self.max.numpy())
+                save_images(mask, os.path.join(logdir, method, 'mask_attack.jpg'))
+                if random:
+                    save_images(mask_random, os.path.join(logdir, method, 'mask_random_attack.jpg'))
+            else:
+                save_images(img, os.path.join(logdir, method, 'raw.jpg'), self.min.numpy(), self.max.numpy())
+                save_images(mask, os.path.join(logdir, method, 'mask.jpg'))
+                if random:
+                    save_images(mask_random, os.path.join(logdir, method, 'mask_random.jpg'))
             #cam=mask*0.5+img*0.5
             #save_images(cam, os.path.join(logdir, method, 'cam.jpg'))
             if img.shape[0]==1:

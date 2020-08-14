@@ -1,12 +1,7 @@
 from attribution_methods import explainer
 from captum.attr import (
     GradientShap,
-    DeepLift,
     DeepLiftShap,
-    IntegratedGradients,
-    LayerConductance,
-    NeuronConductance,
-    NoiseTunnel,
 )
 import collections
 import numpy as np
