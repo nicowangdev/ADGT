@@ -355,32 +355,52 @@ class ADGT():
             img=img.cuda()
             label=label.cuda()
 
-        if method=='SHAP':
-            from attribution_methods import SHAP
-            obj=SHAP.gradient_shap(model)
-            mask =obj.get_attribution_map(img,label)
-            mask=torch.mean(mask,1,keepdim=True)
-            mask=mask.cpu().numpy()
-            if random:
-                obj = SHAP.gradient_shap(random_model)
-                mask_random = obj.get_attribution_map(img, label)
-                mask_random = torch.mean(mask_random, 1, keepdim=True)
-                mask_random = mask_random.cpu().numpy()
-        elif method=='Guided_BackProb':
-            from attribution_methods import Guided_BackProp
-            obj=Guided_BackProp.guided_backprop(model)
+        def obtain_explain(alg,random):
+            obj = alg.Explainer(model)
             mask = obj.get_attribution_map(img, label)
             mask = torch.mean(mask, 1, keepdim=True)
+            if mask.requires_grad:
+                mask=mask.detach()
             mask = mask.cpu().numpy()
+            mask_random=None
             if random:
-                obj = Guided_BackProp.guided_backprop(random_model)
+                obj = alg.Explainer(random_model)
                 mask_random = obj.get_attribution_map(img, label)
                 mask_random = torch.mean(mask_random, 1, keepdim=True)
+                if mask_random.requires_grad:
+                    mask_random = mask_random.detach()
                 mask_random = mask_random.cpu().numpy()
+            return mask,mask_random
 
+        if method=='GradientSHAP':
+            from attribution_methods import GradientSHAP
+            mask,mask_random=obtain_explain(GradientSHAP,random)
+        elif method=='DeepLIFTSHAP':
+            from attribution_methods import DeepLIFTSHAP
+            mask,mask_random=obtain_explain(DeepLIFTSHAP,random)
+        elif method=='Guided_BackProb':
+            from attribution_methods import Guided_BackProp
+            mask,mask_random=obtain_explain(Guided_BackProp, random)
+        elif method=='DeepLIFT':
+            from attribution_methods import DeepLIFT
+            mask,mask_random=obtain_explain(DeepLIFT, random)
+        elif method=='IntegratedGradients':
+            from attribution_methods import IntegratedGradients
+            mask,mask_random=obtain_explain(IntegratedGradients, random)
+        elif method=='InputXGradient':
+            from attribution_methods import InputXGradient
+            mask,mask_random=obtain_explain(InputXGradient, random)
+        elif method == 'Occlusion':
+            from attribution_methods import Occlusion
+            mask, mask_random = obtain_explain(Occlusion, random)
+        elif method == 'Saliency':
+            from attribution_methods import Saliency
+            mask, mask_random = obtain_explain(Saliency, random)
         if logdir is not None:
             if not os.path.exists(os.path.join(logdir,method)):  # 如果路径不存在
                 os.makedirs(os.path.join(logdir,method))
+            if img.requires_grad:
+                img=img.detach()
             img=img.cpu().numpy()
 
             if attack:

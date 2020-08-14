@@ -1,11 +1,11 @@
-from captum.attr import GuidedBackprop
+from captum.attr import InputXGradient
 
 import torch
 
 class Explainer():
     def __init__(self,model):
         self.model=model
-        self.explain=GuidedBackprop(model)
+        self.explain=InputXGradient(model)
 
 
     def get_attribution_map(self,img,target=None):
