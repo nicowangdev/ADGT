@@ -20,5 +20,7 @@ def get_dataset(name='MNIST',root='../data',transform=transforms.Compose([transf
         return dataset
     if name=='C10':
         dataset=datasets.CIFAR10(root,train=train,transform=transform,download=True)
-
+        return dataset
+    if name=='C100':
+        dataset=datasets.CIFAR100(root,train=train,transform=transform,download=True)
         return dataset
