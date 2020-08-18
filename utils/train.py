@@ -74,6 +74,41 @@ def attack_train(model,trainloader,testloader,optimizer,
             schedule.step()
     return model
 
+def removeSPP_train(model,trainloader,testloader,optimizer,
+                     schedule,criterion,max_epoch,writer,use_cuda,mu,sigma,prob):
+
+    if use_cuda:
+        mu,sigma=mu.cuda(),sigma.cuda()
+    for i in range(max_epoch):
+        index=0
+        lossmean = 0
+        num = 0
+        for data,label in trainloader:
+            index+=1
+            optimizer.zero_grad()
+            model.train()
+            if use_cuda:
+                data,label=data.cuda(),label.cuda()
+            mu_temp,sigma_temp=mu[label],sigma[label]
+            R=torch.randn_like(data)*sigma_temp+mu_temp
+            P=torch.bernoulli(torch.ones_like(data)*prob)
+            data=data*(1-P)+R*P
+            out = model(data)
+            loss = criterion(out, label)
+            loss.backward()
+            optimizer.step()
+            if index%10==0:
+                print(i, index, loss.item())
+                lossmean += loss.item()
+                num += 1
+        writer.add_scalar('loss', lossmean / num, i)
+        acc=get_acc(testloader,model,use_cuda)
+        writer.add_scalar('acc', acc.item(), i)
+        print(i, acc.item())
+        if schedule is not None:
+            schedule.step()
+    return model
+
 def get_acc(loader,model,use_cuda):
     right=0
     all=0
