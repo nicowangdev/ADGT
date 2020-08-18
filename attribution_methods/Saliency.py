@@ -11,5 +11,5 @@ class Explainer():
     def get_attribution_map(self,img,target=None):
         if target is None:
             target=torch.argmax(self.model(img),1)
-        attributions = self.explain.attribute(img, target=target)
+        attributions = self.explain.attribute(img, target=target,abs=False)
         return attributions

@@ -1,5 +1,5 @@
 from utils.prepare_dataset import get_dataset
-from utils.train import normal_train,attack_train,clip
+from utils.train import normal_train,attack_train,clip,removeSPP_train
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 from utils.visualization import save_images
@@ -22,7 +22,7 @@ class ADGT():
     attack=None
     min=None
     max=None
-
+    mu=None
     use_cuda=False
 
     nclass={'MNIST':10,'C10':10,'C100':100}
@@ -107,7 +107,7 @@ class ADGT():
         torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
         return model
 
-    def attck_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+    def attack_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
                      schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False,gamma=0.5):
         '''
         Input:
@@ -319,9 +319,42 @@ class ADGT():
                 print('class',n0,'now',now)
         print(self.attack)
 
+    def removeSPP_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,gamma=0.5):
+        '''
+        Input:
 
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
 
-    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True,random=False):
+        if self.mu is None:
+            self.obtain_statistics()
+        logdir=os.path.join(logdir,self.dataset_name,'removeSPP'+'_'+str(gamma))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        mu=self.mu
+        sigma=torch.sqrt(self.var)
+        removeSPP_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
+                     mu,sigma,prob=gamma)
+        writer.close()
+
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'removeSPP'+'_'+str(gamma))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model, os.path.join(checkpointdir, 'model.ckpt'))
+        return model
+
+    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True,random=False,suffix=''):
         '''
         input:
         img: batch X channels X height X width [BCHW], torch Tensor
@@ -397,22 +430,22 @@ class ADGT():
             from attribution_methods import Saliency
             mask, mask_random = obtain_explain(Saliency, random)
         if logdir is not None:
-            if not os.path.exists(os.path.join(logdir,method)):  # 如果路径不存在
-                os.makedirs(os.path.join(logdir,method))
+            if not os.path.exists(os.path.join(logdir,method+suffix)):  # 如果路径不存在
+                os.makedirs(os.path.join(logdir,method+suffix))
             if img.requires_grad:
                 img=img.detach()
             img=img.cpu().numpy()
 
             if attack:
-                save_images(img, os.path.join(logdir, method, 'raw_attack.jpg'), self.min.numpy(), self.max.numpy())
-                save_images(mask, os.path.join(logdir, method, 'mask_attack.jpg'))
+                save_images(img, os.path.join(logdir, method+suffix, 'raw_attack.jpg'), self.min.numpy(), self.max.numpy())
+                save_images(mask, os.path.join(logdir, method+suffix, 'mask_attack.jpg'))
                 if random:
-                    save_images(mask_random, os.path.join(logdir, method, 'mask_random_attack.jpg'))
+                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random_attack.jpg'))
             else:
-                save_images(img, os.path.join(logdir, method, 'raw.jpg'), self.min.numpy(), self.max.numpy())
-                save_images(mask, os.path.join(logdir, method, 'mask.jpg'))
+                save_images(img, os.path.join(logdir, method+suffix, 'raw.jpg'), self.min.numpy(), self.max.numpy())
+                save_images(mask, os.path.join(logdir, method+suffix, 'mask.jpg'))
                 if random:
-                    save_images(mask_random, os.path.join(logdir, method, 'mask_random.jpg'))
+                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random.jpg'))
             #cam=mask*0.5+img*0.5
             #save_images(cam, os.path.join(logdir, method, 'cam.jpg'))
             if img.shape[0]==1:
