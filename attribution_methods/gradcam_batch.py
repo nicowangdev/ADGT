@@ -50,7 +50,7 @@ class ModelOutputs():
         for name, module in self.model._modules.items():
             if module == self.feature_module:
                 target_activations, x = self.feature_extractor(x)
-            elif "avgpool" == name.lower():
+            elif "avgpool" == name.lower() or 'avg_pool' == name.lower():
                 x = module(x)
                 x = x.view(x.size(0), -1)
             else:
@@ -121,7 +121,7 @@ class GradCam:
             new_cam[i] = cv2.resize(cam[i], (input.shape[2], input.shape[3]))
         cam = new_cam
         cam = cam / (np.max(cam) + 1e-8)
-        return cam
+        return torch.Tensor(cam.reshape([cam.shape[0],1,cam.shape[1],cam.shape[2]]))
 
 
 # test-passed

@@ -3,12 +3,14 @@ import torch
 
 
 class Explainer():
-    def __init__(self, model, layer):
+    def __init__(self, model, layer=None):
         self.model = model
+        if layer is None:
+            layer=model.conv4_x
         self.explainer = GradCam(model=model, feature_module=layer, use_cuda=torch.cuda.is_available())
 
     def get_attribution_map(self, img, target=None):
-        attributions = self.explainer(input, target)
+        attributions = self.explainer(img, target)
         return attributions
 
 

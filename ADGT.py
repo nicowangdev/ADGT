@@ -354,7 +354,7 @@ class ADGT():
         torch.save(model, os.path.join(checkpointdir, 'model.ckpt'))
         return model
 
-    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True,random=False,suffix=''):
+    def explain(self,img,label,logdir=None,model=None,method='GradientSHAP',attack=True,random=False,suffix=''):
         '''
         input:
         img: batch X channels X height X width [BCHW], torch Tensor
@@ -429,6 +429,9 @@ class ADGT():
         elif method == 'Saliency':
             from attribution_methods import Saliency
             mask, mask_random = obtain_explain(Saliency, random)
+        elif method=='GradCAM':
+            from attribution_methods import Grad_CAM
+            mask, mask_random = obtain_explain(Grad_CAM, random)
         if logdir is not None:
             if not os.path.exists(os.path.join(logdir,method+suffix)):  # 如果路径不存在
                 os.makedirs(os.path.join(logdir,method+suffix))
