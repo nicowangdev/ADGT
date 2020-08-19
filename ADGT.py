@@ -432,6 +432,9 @@ class ADGT():
         elif method=='GradCAM':
             from attribution_methods import Grad_CAM
             mask, mask_random = obtain_explain(Grad_CAM, random)
+        elif method=='SmoothGrad':
+            from attribution_methods import SmoothGrad
+            mask, mask_random = obtain_explain(SmoothGrad, random)
         if logdir is not None:
             if not os.path.exists(os.path.join(logdir,method+suffix)):  # 如果路径不存在
                 os.makedirs(os.path.join(logdir,method+suffix))

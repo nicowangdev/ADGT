@@ -5,7 +5,7 @@ import torchvision.transforms as transforms
 os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 import torch
 use_cuda=True
-method='GradCAM'#'GradientSHAP'#'InputXGradient'#'IntegratedGradients'#'DeepLIFT'#'DeepLIFTSHAP'#'Guided_BackProb'#'Saliency'
+method='SmoothGrad'#'GradCAM'#'GradientSHAP'#'InputXGradient'#'IntegratedGradients'#'DeepLIFT'#'DeepLIFTSHAP'#'Guided_BackProb'#'Saliency'
 ROOT='/newsd4/zgh/data'
 CKPTDIR='/newsd4/zgh/ADGT/CKPT'
 gamma=0.4
