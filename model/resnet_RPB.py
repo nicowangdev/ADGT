@@ -6,7 +6,6 @@ import torch
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
 
-
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
@@ -15,40 +14,115 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
-class RPB(nn.Module):
-    def __init__(self,num_features,height,width=None,prob=0.1,momentum=0.999,):
-        super(RPB,self).__init__()
+
+class RPB_old(nn.Module):
+    def __init__(self, num_features, height, width=None, prob=0.1, momentum=0.999, point_size=4):
+        super(RPB_old, self).__init__()
         if width is None:
-            width=height
-        self.register_buffer('running_mean', torch.zeros(1,num_features,height,width))
-        self.register_buffer('running_var', torch.ones(1,num_features,height,width))
+            width = height
+        self.ps=point_size
+        w=int(width/point_size)
+        h=int(height/point_size)
+        w2 = int(width / 2)
+        h2 = int(height / 2)
+        self.register_buffer('running_mean_1', torch.zeros(1, num_features, height, width))
+        self.register_buffer('running_var_1', torch.ones(1, num_features, height, width))
+        self.register_buffer('running_mean_2', torch.zeros(1, num_features, h2, w2))
+        self.register_buffer('running_var_2', torch.ones(1, num_features, h2, w2))
+        self.register_buffer('running_mean', torch.zeros(1, num_features, h, w))
+        self.register_buffer('running_var', torch.ones(1, num_features, h, w))
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.reset_running_stats()
-        self.momentum=momentum
-        self.prob=prob
+        self.momentum = momentum
+        self.prob = prob*0.3
 
     def reset_running_stats(self):
-        if self.track_running_stats:
-            self.running_mean.zero_()
-            self.running_var.fill_(1)
-            self.num_batches_tracked.zero_()
+        self.running_mean.zero_()
+        self.running_var.fill_(1)
+        self.num_batches_tracked.zero_()
 
-    def forward(self, input):
+    def forward(self, x):
         if not self.training:
-            return input
-        self.running_mean=self.running_mean*self.momentum+torch.mean(input,0,keepdim=True)*(1-self.momentum)
-        self.running_var=self.running_var*self.momentum+torch.mean((input-self.running_mean)**2,0,keepdim=True)*(1-self.momentum)
+            return x
+
+        input=F.avg_pool2d(x,kernel_size=self.ps,stride=self.ps)
+        self.running_mean = self.running_mean * self.momentum + torch.mean(input, 0, keepdim=True).data * (1 - self.momentum)
+        self.running_var = self.running_var * self.momentum + torch.mean((input - self.running_mean).data ** 2, 0,
+                                                                         keepdim=True) * (1 - self.momentum)
         R = torch.randn_like(input) * torch.sqrt(self.running_var) + self.running_mean
         P = torch.bernoulli(torch.ones_like(input) * self.prob)
-        output=input*(1-P)+R*P
+        R=F.interpolate(R,scale_factor=self.ps)
+        P=F.interpolate(P,scale_factor=self.ps)
+        output = x * (1 - P) + R * P
+        #================================
+        input2 = F.avg_pool2d(x, kernel_size=2, stride=2)
+        self.running_mean_2 = self.running_mean_2 * self.momentum + torch.mean(input2, 0, keepdim=True).data * (
+                    1 - self.momentum)
+        self.running_var_2 = self.running_var_2 * self.momentum + torch.mean((input2 - self.running_mean_2).data ** 2, 0,
+                                                                         keepdim=True) * (1 - self.momentum)
+        R2 = torch.randn_like(input2) * torch.sqrt(self.running_var_2 ) + self.running_mean_2
+        P2 = torch.bernoulli(torch.ones_like(input2) * self.prob)
+        R2 = F.interpolate(R2, scale_factor=2)
+        P2 = F.interpolate(P2, scale_factor=2)
+        output = output * (1 - P2) + R2 * P2
+        #====================================
+        self.running_mean_1 = self.running_mean_1 * self.momentum + torch.mean(x, 0, keepdim=True).data * (
+                1 - self.momentum)
+        self.running_var_1 = self.running_var_1 * self.momentum + torch.mean((x - self.running_mean_1).data ** 2, 0,
+                                                                             keepdim=True) * (1 - self.momentum)
+        R1 = torch.randn_like(x) * torch.sqrt(self.running_var_1) + self.running_mean_1
+        P1 = torch.bernoulli(torch.ones_like(x) * self.prob)
+        output = output * (1 - P1) + R1 * P1
         return output
 
-class GLM(nn.Module):
-    def __init__(self,in_features,out_features):
-        super(GLM,self).__init__()
-        self.net=nn.Linear(in_features,out_features)
+class RPB(nn.Module):
+    def __init__(self, num_features=None, height=None, width=None, prob=0.1, momentum=0.999, point_size=4):
+        super(RPB, self).__init__()
+        self.point_size=point_size
+        self.prob=prob
     def forward(self, x):
-        return self.net(x.view(x.size(0),-1))
+        if not self.training:
+            return x
+        ps=self.point_size
+        output=x
+        #index = (torch.rand(x.size(0)) * x.size(0)).long().cuda()
+        #R = x[index]
+        while ps>0:
+            index = (torch.rand(x.size(0)) * x.size(0)).long().cuda()
+            R = x[index]
+            P = torch.bernoulli(torch.ones(x.size(0),x.size(1),int(x.size(2)/ps)+1,int(x.size(3)/ps)+1) * self.prob).cuda()
+            temp = F.interpolate(P, scale_factor=ps)
+            rh=torch.rand(x.size(0))*ps
+            rw=torch.rand(x.size(0))*ps
+            rh,rw=rh.long().cuda(),rw.long().cuda()
+            #P=torch.zeros_like(x)
+            #for i in range(x.size(0)):
+            #    P[i,:,:,:]=temp[i,:,rh[i]:rh[i]+x.size(2),rw[i]:rw[i]+x.size(3)]
+            P=temp[:,:,rh[0]:rh[0]+x.size(2),rw[0]:rw[0]+x.size(3)]
+            output=output * (1 - P) + R * P
+            ps=int(ps/2)
+        return output
+import numpy as np
+class RPB_batch(nn.Module):
+    def __init__(self, num_features=None, height=None, width=None, prob=0.1, momentum=0.999, point_size=10):
+        super(RPB_batch, self).__init__()
+        self.point_size=point_size
+        self.prob=prob
+    def forward(self, x):
+        if not self.training:
+            return x
+        ps=self.point_size
+        output=x
+        #index = (torch.rand(x.size(0)) * x.size(0)).long().cuda()
+        index=np.arange(output.size(0))
+        np.random.shuffle(index)
+        index=torch.LongTensor(index).cuda()
+
+        R = x[index]
+        P = torch.zeros_like(x)
+        P[:,:,0:ps,0:ps]=1
+        output=output * (1 - P) + R * P
+        return output
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -73,15 +147,13 @@ class BasicBlock(nn.Module):
         self.bn2 = nn.BatchNorm2d(planes)
         self.downsample = downsample
         self.stride = stride
-        self.relu0=nn.ReLU()
-        self.relu1=nn.ReLU()
 
     def forward(self, x):
         identity = x
 
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu0(out)
+        out = F.relu(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
@@ -90,7 +162,7 @@ class BasicBlock(nn.Module):
             identity = self.downsample(x)
 
         out += identity
-        out = self.relu1(out)
+        out = F.relu(out)
 
         return out
 
@@ -108,20 +180,17 @@ class Bottleneck(nn.Module):
         self.bn3 = nn.BatchNorm2d(planes * self.expansion)
         self.downsample = downsample
         self.stride = stride
-        self.relu0 = nn.ReLU()
-        self.relu1 = nn.ReLU()
-        self.relu2 = nn.ReLU()
 
     def forward(self, x):
         identity = x
 
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu0(out)
+        out = F.relu(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.relu1(out)
+        out = F.relu(out)
 
         out = self.conv3(out)
         out = self.bn3(out)
@@ -130,28 +199,33 @@ class Bottleneck(nn.Module):
             identity = self.downsample(x)
 
         out += identity
-        out = self.relu2(out)
+        out = F.relu(out)
 
         return out
 
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False):
+    def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,size=224,prob=0.1,plugin_layer=1,point_size=1):
         super(ResNet, self).__init__()
         self.inplanes = 64
+        self.plugin=plugin_layer
+        self.RPB0 = RPB(3, size, prob=prob,point_size=point_size)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        #self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.RPB1 = RPB(64, int(size/4), prob=prob)
         self.layer1 = self._make_layer(block, 64, layers[0])
+        self.RPB2 = RPB(64* block.expansion, int(size / 4), prob=prob)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+        self.RPB3 = RPB(128* block.expansion, int(size / 8), prob=prob)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+        self.RPB4 = RPB(256* block.expansion, int(size / 16), prob=prob)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
-        self.relu=nn.ReLU()
-
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -187,14 +261,25 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        if self.plugin==0:
+            x=self.RPB0(x)
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
+        x = F.relu(x)
+        #x = self.maxpool(x)
+        x=self.maxpool(x)
 
+        if self.plugin == 1:
+            x = self.RPB1(x)
         x = self.layer1(x)
+        if self.plugin==2:
+            x=self.RPB2(x)
         x = self.layer2(x)
+        if self.plugin==3:
+            x=self.RPB3(x)
         x = self.layer3(x)
+        if self.plugin==4:
+            x=self.RPB4(x)
         x = self.layer4(x)
 
         x = self.avgpool(x)

@@ -6,7 +6,10 @@ class Explainer():
     def __init__(self, model, layer=None):
         self.model = model
         if layer is None:
-            layer=model.conv4_x
+            if hasattr(model,'conv4_x'):
+                layer=model.conv4_x
+            elif hasattr(model,'layer4'):
+                layer=model.layer4
         self.explainer = GradCam(model=model, feature_module=layer, use_cuda=torch.cuda.is_available())
 
     def get_attribution_map(self, img, target=None):
