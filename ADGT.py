@@ -1,5 +1,6 @@
 from utils.prepare_dataset import get_dataset
-from utils.train import normal_train,attack_train,clip,removeSPP_train
+from utils.train import normal_train,attack_train,clip,removeSPP_train,remove_attack_train,adversarial_train,\
+    RPB_train,mixup_train,L1_train,L1_RPB_train
 import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 from utils.visualization import save_images
@@ -12,6 +13,8 @@ import numpy as np
 class ADGT():
     normal_model=None
     gt_model=None
+    improve_model=None
+    RPB_model=None
 
     dataset_name=None
     trainset=None
@@ -24,10 +27,13 @@ class ADGT():
     max=None
     mu=None
     use_cuda=False
+    aug=False
 
-    nclass={'MNIST':10,'C10':10,'C100':100}
+    nclass={'MNIST':10,'C10':10,'C100':100,'Flower102':102,'RestrictedImageNet':9}
 
-    def __init__(self,name='MNIST',nclass=None,use_cuda=False,min=None,max=None,attack=None,normal_model=None,gt_model=None):
+    def __init__(self,name='MNIST',nclass=None,use_cuda=False,min=None,max=None,attack=None,normal_model=None,
+                 gt_model=None,aug=False):
+        self.aug=aug
         self.use_cuda=use_cuda
         self.dataset_name=name
         if nclass is not None:
@@ -58,6 +64,13 @@ class ADGT():
     def load_normal(self,checkpointdir):
         model = torch.load(os.path.join(checkpointdir, 'model.ckpt'))
         self.normal_model=model
+    def load_improve(self,checkpointdir):
+        model = torch.load(os.path.join(checkpointdir, 'model.ckpt'))
+        self.improve_model=model
+
+    def load_RPB(self,checkpointdir):
+        model = torch.load(os.path.join(checkpointdir, 'model.ckpt'))
+        self.RPB_model=model
     def prepare_dataset_loader(self,root='../data',transform=transforms.Compose([transforms.ToTensor()]),
                                train=True,batch_size=128,shuffle=True,num_workers=4):
         '''
@@ -76,7 +89,7 @@ class ADGT():
                                                            num_workers=num_workers)
 
     def normal_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
-                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,):
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,suffix='',img=None,target=None,method=None):
         '''
         Input:
 
@@ -90,25 +103,83 @@ class ADGT():
             optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
         if self.use_cuda:
             model=model.cuda()
-        logdir=os.path.join(logdir,self.dataset_name,'normal')
+        logdir=os.path.join(logdir,self.dataset_name,'normal'+str(self.aug)+suffix)
         writer = SummaryWriter(log_dir=logdir )
         print('save logs to :', logdir)
 
-        normal_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda)
+        normal_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
+                     img,target,method,self.explain,explain_dir=logdir)
         writer.close()
         if self.normal_model is None:
             self.normal_model=model
 
-        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'normal')
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'normal'+str(self.aug)+suffix)
 
         if not os.path.exists(checkpointdir):  # 如果路径不存在
             os.makedirs(checkpointdir)
         print('save checkpoints to :', checkpointdir)
         torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
         return model
+    def L1_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,alpha=0.01):
+        '''
+        Input:
 
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+        logdir=os.path.join(logdir,self.dataset_name,'L1_'+str(alpha)+str(self.aug))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+
+        L1_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,alpha)
+        writer.close()
+
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'L1_'+str(alpha)+str(self.aug))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
+    def mixup_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,alpha=1):
+        '''
+        Input:
+
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+        logdir=os.path.join(logdir,self.dataset_name, 'mixup_'+str(alpha)+str(self.aug))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+
+        mixup_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, alpha,self.use_cuda)
+        writer.close()
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'mixup_'+str(alpha)+str(self.aug))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
     def attack_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
-                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False,gamma=0.5):
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,inject_num=1,random=False,alpha=0.0,suffix='',
+                     img=None,target=None,method=None):
         '''
         Input:
 
@@ -128,23 +199,24 @@ class ADGT():
             self.obtain_statistics()
         if self.attack is None:
             if not random:
-                self.obtain_attack(inject_num=inject_num,gamma=gamma)
+                self.obtain_attack(inject_num=inject_num,alpha=alpha)
             else:
                 self.random_attack(inject_num=inject_num)
         if random:
             r='_random'
         else:
             r=''
-        logdir=os.path.join(logdir,self.dataset_name,'attack_'+str(inject_num)+'_'+str(gamma)+r)
+        logdir=os.path.join(logdir,self.dataset_name,'attack_'+str(inject_num)+'_'+str(alpha)+r+str(self.aug)+suffix)
         writer = SummaryWriter(log_dir=logdir )
         print('save logs to :', logdir)
+
         attack_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
-                     self.attack,self.min,self.max)
+                     self.attack,self.min,self.max,img,target,method,self.explain,explain_dir=logdir)
         writer.close()
         if self.gt_model is None:
             self.gt_model=model
 
-        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack_'+str(inject_num)+'_'+str(gamma)+r)
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'attack_'+str(inject_num)+'_'+str(alpha)+r+str(self.aug)+suffix)
 
         self.save_gt(checkpointdir)
         return model
@@ -220,8 +292,15 @@ class ADGT():
                     self.right_prob[i,:,:,:,0]+=torch.sum(temp_min,0)
                     self.right_prob[i, :, :, :, 1] += torch.sum(temp_max, 0)
         self.right_prob=self.right_prob/num_in.view(K,1,1,1,1)
-
-
+    def parallel(self):
+        if self.normal_model is not None:
+            self.normal_model=nn.DataParallel(self.normal_model)
+        if self.gt_model is not None:
+            self.gt_model=nn.DataParallel(self.gt_model)
+        if self.improve_model is not None:
+            self.improve_model=nn.DataParallel(self.improve_model)
+        if self.RPB_model is not None:
+            self.RPB_model=nn.DataParallel(self.RPB_model)
     def random_attack(self,inject_num=1):
         from scipy.stats import norm
         K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
@@ -253,7 +332,9 @@ class ADGT():
                 i+=1
                 print('class',n0,'now',now)
         print(self.attack)
-    def obtain_attack(self,inject_num=1,gamma=0.5):
+
+
+    def obtain_attack(self,inject_num=1,alpha=0.5):
         from scipy.stats import norm
         K,C,H,W=self.nclass[self.dataset_name],self.channels,self.heights,self.width
         eloss=torch.zeros(K,C,H,W,2)
@@ -270,10 +351,12 @@ class ADGT():
         phi1 = torch.Tensor(norm.cdf(t1.numpy()))
         eloss[:, :, :, :, 1] = -sigma * (-T * torch.exp(-0.5 * t1 ** 2) + t1 * (1-phi1))
 
-        maxnorm=(self.max-self.min).squeeze()
+        maxnorm=(self.max-self.min).view(-1)
+
         self.attack=torch.zeros(K,C,H,W)
         jilu=torch.zeros(K)
         pan=torch.zeros(1,C,H,W,2)
+        pan[:,:,:,:,0]=1
         #========================================
         right_prob=self.right_prob
         '''
@@ -289,7 +372,7 @@ class ADGT():
         right_prob[:, :, :, :, 1] = 1-phi_in1
         '''
         #====================
-        value=eloss*gamma+(1-gamma)*right_prob
+        value=eloss*alpha+(1-alpha)*right_prob
         value_temp=value.view(-1)
 
         i=now=0
@@ -310,7 +393,8 @@ class ADGT():
             n0 = index
             if jilu[n0]<inject_num and pan[0,n1,n2,n3,n4]==0:
                 jilu[n0]+=1
-                pan[0, n1, n2, n3, n4]=1
+                #pan[0,n1,n2,n3,n4]=1
+                pan[0, :, n2, n3, n4] = 1
                 if n4==0:
                     self.attack[n0,n1,n2,n3]=-maxnorm[n1]*2
                 else:
@@ -337,7 +421,7 @@ class ADGT():
 
         if self.mu is None:
             self.obtain_statistics()
-        logdir=os.path.join(logdir,self.dataset_name,'removeSPP'+'_'+str(gamma))
+        logdir=os.path.join(logdir,self.dataset_name,'removeSPP'+'_'+str(gamma)+str(self.aug))
         writer = SummaryWriter(log_dir=logdir )
         print('save logs to :', logdir)
         mu=self.mu
@@ -346,7 +430,38 @@ class ADGT():
                      mu,sigma,prob=gamma)
         writer.close()
 
-        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'removeSPP'+'_'+str(gamma))
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'removeSPP'+'_'+str(gamma)+str(self.aug))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model, os.path.join(checkpointdir, 'model.ckpt'))
+        return model
+    def remove_attack_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,gamma=0.5,alpha=0.0):
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+
+        if self.mu is None:
+            self.obtain_statistics()
+        if self.attack is None:
+            self.obtain_attack(inject_num=1,alpha=alpha)
+        logdir=os.path.join(logdir,self.dataset_name,'remove_attack'+'_'+str(gamma)+str(self.aug))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        mu=self.mu
+        sigma=torch.sqrt(self.var)
+        remove_attack_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
+                     mu,sigma,prob=gamma,attack=self.attack,min=self.min,max=self.max)
+        writer.close()
+
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'remove_attack'+'_'+str(gamma)+'_'+str(alpha)+str(self.aug))
 
         if not os.path.exists(checkpointdir):  # 如果路径不存在
             os.makedirs(checkpointdir)
@@ -354,7 +469,137 @@ class ADGT():
         torch.save(model, os.path.join(checkpointdir, 'model.ckpt'))
         return model
 
-    def explain(self,img,label,logdir=None,model=None,method='SHAP',attack=True,random=False,suffix=''):
+    def RPB_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,prob=0.5,alpha=0.2,point_size=1,suffix='',
+                  img=None,target=None,method=None):
+        '''
+        Input:
+
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+
+        logdir=os.path.join(logdir,self.dataset_name,'RPB_'+str(prob)+'_'+str(alpha)+'_'+str(point_size)+str(self.aug)+suffix)
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        from model.resnet_RPB import RPB
+        rpb=RPB(prob=alpha,point_size=point_size)
+        RPB_train(model,rpb, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,
+                  prob,alpha,img,target,method,self.explain,explain_dir=logdir)
+        writer.close()
+        if self.RPB_model is None:
+            self.RPB_model=model
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'RPB_'+str(prob)+'_'+str(alpha)+'_'
+                                     +str(point_size)+str(self.aug)+suffix)
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
+    def RPB_batch_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,point_size=1,suffix=''):
+        '''
+        Input:
+
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+
+        logdir=os.path.join(logdir,self.dataset_name,'RPB_batch'+'_'+str(point_size)+str(self.aug)+suffix)
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        from model.resnet_RPB import RPB_batch
+        rpb=RPB_batch(point_size=point_size)
+        RPB_train(model,rpb, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda)
+        writer.close()
+        if self.RPB_model is None:
+            self.RPB_model=model
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'RPB_batch'+'_'
+                                     +str(point_size)+str(self.aug)+suffix)
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
+    def L1_RPB_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,prob=0.1,point_size=1,alpha=0.1):
+        '''
+        Input:
+
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+
+        logdir=os.path.join(logdir,self.dataset_name,'L1_RPB_'+str(prob)+'_'+str(point_size)+'_'+str(alpha)+str(self.aug))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        from model.resnet_RPB import RPB
+        rpb=RPB(prob=prob,point_size=point_size)
+        L1_RPB_train(model,rpb, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer, self.use_cuda,prob,alpha)
+        writer.close()
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'L1_RPB_'+str(prob)+'_'
+                                     +str(point_size)+'_'+str(alpha)+str(self.aug))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
+    def adversarial_train(self,model,logdir,checkpointdir,trainloader=None,testloader=None,optimizer=None,
+                     schedule=None,criterion=nn.CrossEntropyLoss(),max_epoch=50,perturbation_type='l2',eps=0.3):
+        '''
+        Input:
+
+        Output: model
+        '''
+        if trainloader is None:
+            trainloader=self.trainloader
+        if testloader is None:
+            testloader=self.testloader
+        if optimizer is None:
+            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.9))
+        if self.use_cuda:
+            model=model.cuda()
+        logdir=os.path.join(logdir,self.dataset_name,'adversarial_'+perturbation_type+'_'+str(eps)+str(self.aug))
+        writer = SummaryWriter(log_dir=logdir )
+        print('save logs to :', logdir)
+        if self.min is None:
+            self.obtain_statistics()
+        adversarial_train(model, trainloader, testloader, optimizer,schedule, criterion, max_epoch, writer,
+                          self.use_cuda,self.min,self.max,perturbation_type,eps)
+        writer.close()
+
+        checkpointdir = os.path.join(checkpointdir, self.dataset_name, 'adversarial_'+perturbation_type+'_'+str(eps)+str(self.aug))
+
+        if not os.path.exists(checkpointdir):  # 如果路径不存在
+            os.makedirs(checkpointdir)
+        print('save checkpoints to :', checkpointdir)
+        torch.save(model,os.path.join(checkpointdir,'model.ckpt'))
+        return model
+    def explain(self,img,label,logdir=None,model=None,method='GradientSHAP',attack=True,random=False,improve=False,suffix=''):
         '''
         input:
         img: batch X channels X height X width [BCHW], torch Tensor
@@ -364,11 +609,17 @@ class ADGT():
         '''
         if not attack:
             if model is None:
-                model=self.normal_model
+                if improve:
+                    model=self.improve_model
+                else:
+                    model=self.normal_model
         else:
             if model is None:
-                model=self.gt_model
-                img=self.attack_img(img,label)
+                if improve:
+                    model = self.improve_model
+                else:
+                    model = self.gt_model
+            img=self.attack_img(img,label)
 
         def weights_init(m):
             classname = m.__class__.__name__
@@ -404,7 +655,7 @@ class ADGT():
                     mask_random = mask_random.detach()
                 mask_random = mask_random.cpu().numpy()
             return mask,mask_random
-
+        model=model.eval()
         if method=='GradientSHAP':
             from attribution_methods import GradientSHAP
             mask,mask_random=obtain_explain(GradientSHAP,random)
@@ -429,6 +680,18 @@ class ADGT():
         elif method == 'Saliency':
             from attribution_methods import Saliency
             mask, mask_random = obtain_explain(Saliency, random)
+        elif method=='GradCAM':
+            from attribution_methods import Grad_CAM
+            mask, mask_random = obtain_explain(Grad_CAM, random)
+        elif method=='SmoothGrad':
+            from attribution_methods import SmoothGrad
+            mask, mask_random = obtain_explain(SmoothGrad, random)
+        elif method=='RectGrad':
+            from attribution_methods import RectGrad
+            mask, mask_random = obtain_explain(RectGrad, random)
+        else:
+            print('no this method')
+
         if logdir is not None:
             if not os.path.exists(os.path.join(logdir,method+suffix)):  # 如果路径不存在
                 os.makedirs(os.path.join(logdir,method+suffix))
@@ -437,20 +700,38 @@ class ADGT():
             img=img.cpu().numpy()
 
             if attack:
-                save_images(img, os.path.join(logdir, method+suffix, 'raw_attack.jpg'), self.min.numpy(), self.max.numpy())
-                save_images(mask, os.path.join(logdir, method+suffix, 'mask_attack.jpg'))
+                if self.min is not None:
+                    save_images(img, os.path.join(logdir, method+suffix, 'raw_attack.png'), self.min.numpy(), self.max.numpy())
+                if improve:
+                    save_images(mask, os.path.join(logdir, method + suffix, 'mask_attack_improve.png'))
+                    f=open(os.path.join(logdir, method + suffix, 'mask_attack_improve.txt'),'w')
+                else:
+                    save_images(mask, os.path.join(logdir, method+suffix, 'mask_attack.png'))
+                    f = open(os.path.join(logdir, method+suffix, 'mask_attack.txt'), 'w')
                 if random:
-                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random_attack.jpg'))
+                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random_attack.png'))
             else:
-                save_images(img, os.path.join(logdir, method+suffix, 'raw.jpg'), self.min.numpy(), self.max.numpy())
-                save_images(mask, os.path.join(logdir, method+suffix, 'mask.jpg'))
+                if self.min is not None:
+                    save_images(img, os.path.join(logdir, method+suffix, 'raw.png'), self.min.numpy(), self.max.numpy())
+                if improve:
+                    save_images(mask, os.path.join(logdir, method+suffix, 'mask_improve.png'))
+                    f = open(os.path.join(logdir, method+suffix, 'mask_improve.txt'), 'w')
+                else:
+                    save_images(mask, os.path.join(logdir, method+suffix, 'mask.png'))
+                    f = open(os.path.join(logdir, method + suffix, 'mask.txt'), 'w')
                 if random:
-                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random.jpg'))
+                    save_images(mask_random, os.path.join(logdir, method+suffix, 'mask_random.png'))
+            if self.attack is not None:
+                gt=torch.sign(torch.mean(torch.abs(self.attack[label]),1,keepdim=True)).numpy()
+                Q_value=np.sum(np.abs(mask*gt))/np.sum(np.abs(mask)+1e-8)
+                print('quantitative evaluation:', Q_value)
+                print('quantitative evaluation:',Q_value,file=f)
+            f.close()
             #cam=mask*0.5+img*0.5
             #save_images(cam, os.path.join(logdir, method, 'cam.jpg'))
-            if img.shape[0]==1:
-                from utils.visualization import show_cam
-                show_cam(img,mask, os.path.join(logdir, method, 'cam.jpg'))
+            #if img.shape[0]==1:
+            #    from utils.visualization import show_cam
+            #    show_cam(img,mask, os.path.join(logdir, method, 'cam.jpg'))
 
 
 

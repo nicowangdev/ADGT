@@ -1,6 +1,5 @@
 import os
 import matplotlib.pyplot as plt
-from matplotlib.pyplot import imsave
 import torch.nn.functional as F
 from torchvision import  transforms
 plt.switch_backend('agg')
@@ -17,6 +16,7 @@ def show_cam(raw_img,mask,filename):
 
 def save_images(X, save_path,minn=None,maxx=None):
     # [0, 1] -> [0,255]
+
     if minn is None:
         minn=np.min(X.reshape([X.shape[0],-1]),axis=1)
         maxx=np.max(X.reshape([X.shape[0],-1]),axis=1)
@@ -29,8 +29,13 @@ def save_images(X, save_path,minn=None,maxx=None):
         else :
             minn = minn.reshape([X.shape[0], 1])
             maxx = maxx.reshape([X.shape[0], 1])
-    X=(X-minn)/(maxx-minn)
 
+        X=(X-minn)/(maxx-minn+1e-8)
+    else:
+        X = (X - minn) / (maxx - minn + 1e-8)
+        X=np.maximum(X,0)
+        X=np.minimum(X,1)
+    #X = X.squeeze()
     #if isinstance(X.flatten()[0], np.floating):
     #    #X = (255 * X).astype('uint8')
     #    X=np.uint8(255 * X)
@@ -58,7 +63,10 @@ def save_images(X, save_path,minn=None,maxx=None):
         j = int(n / nw)
         i = int(n % nw)
         img[j * h:j * h + h, i * w:i * w + w] = x
-    imsave(save_path, img)
+    np.set_printoptions(threshold=np.inf)
+    #print(save_path,img)
+    plt.imsave(save_path, img)
+    plt.close()
 
 
 import numpy as np
